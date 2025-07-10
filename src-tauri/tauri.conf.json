@@ -1,0 +1,8 @@
+{
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devUrl": "http://localhost:8081"
+  },
+  "identifier": "com.duxnet.wallet"
+} 

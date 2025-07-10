@@ -1,0 +1,651 @@
+// DuxNet - Decentralized P2P Platform Implementation in Rust
+// High-performance implementation without smart contracts
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
+use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature, Signer, Verifier};
+use rand::rngs::OsRng;
+use uuid::Uuid;
+
+// Core data structures
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DID {
+    pub id: String,
+    pub public_key: Vec<u8>,
+    pub endpoints: Vec<String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceMetadata {
+    pub id: ServiceId,
+    pub provider_did: String,
+    pub name: String,
+    pub description: String,
+    pub endpoint: String,
+    pub price: u64,
+    pub reputation_score: f64,
+    pub last_updated: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReputationAttestation {
+    pub attester_did: String,
+    pub target_did: String,
+    pub score: f64,
+    pub interaction_type: String,
+    pub timestamp: u64,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EscrowContract {
+    pub id: String,
+    pub buyer_did: String,
+    pub seller_did: String,
+    pub arbiters: Vec<String>,
+    pub amount: u64,
+    pub state: EscrowState,
+    pub multisig_address: String,
+    pub signatures: HashMap<String, Vec<u8>>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EscrowState {
+    Created,
+    Funded,
+    InProgress,
+    Completed,
+    Disputed,
+    Refunded,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub id: TaskId,
+    pub escrow_id: String,
+    pub service_id: ServiceId,
+    pub payload: Vec<u8>,
+    pub requirements: TaskRequirements,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRequirements {
+    pub cpu_cores: u32,
+    pub memory_mb: u32,
+    pub timeout_seconds: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskResult {
+    pub task_id: TaskId,
+    pub processor_did: String,
+    pub result: Vec<u8>,
+    pub proof: Vec<u8>,
+    pub completed_at: u64,
+}
+
+// DHT Implementation for decentralized service registry
+#[derive(Debug, Clone)]
+pub struct DHTEntry {
+    pub key: String,
+    pub value: Vec<u8>,
+    pub timestamp: u64,
+    pub ttl: u64,
+}
+
+pub struct DHT {
+    pub node_id: NodeId,
+    pub entries: Arc<RwLock<HashMap<String, DHTEntry>>>,
+    pub peers: Arc<RwLock<Vec<String>>>,
+    pub k_bucket_size: usize,
+}
+
+impl DHT {
+    pub fn new(node_id: NodeId) -> Self {
+        DHT {
+            node_id,
+            entries: Arc::new(RwLock::new(HashMap::new())),
+            peers: Arc::new(RwLock::new(Vec::new())),
+            k_bucket_size: 20,
+        }
+    }
+
+    pub async fn store(&self, key: String, value: Vec<u8>, ttl: u64) -> Result<(), String> {
+        let mut entries = self.entries.write().await;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        entries.insert(key.clone(), DHTEntry {
+            key,
+            value,
+            timestamp,
+            ttl,
+        });
+        
+        Ok(())
+    }
+
+    pub async fn get(&self, key: &str) -> Option<Vec<u8>> {
+        let entries = self.entries.read().await;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        if let Some(entry) = entries.get(key) {
+            if now < entry.timestamp + entry.ttl {
+                return Some(entry.value.clone());
+            }
+        }
+        None
+    }
+
+    pub async fn announce_service(&self, service: &ServiceMetadata) -> Result<(), String> {
+        let key = format!("service:{}", service.id.0);
+        let value = serde_json::to_vec(service).map_err(|e| e.to_string())?;
+        self.store(key, value, 3600).await // 1 hour TTL
+    }
+
+    pub async fn find_services(&self, query: &str) -> Vec<ServiceMetadata> {
+        let entries = self.entries.read().await;
+        let mut services = Vec::new();
+        
+        for (key, entry) in entries.iter() {
+            if key.starts_with("service:") {
+                if let Ok(service) = serde_json::from_slice::<ServiceMetadata>(&entry.value) {
+                    if service.name.contains(query) || service.description.contains(query) {
+                        services.push(service);
+                    }
+                }
+            }
+        }
+        
+        services
+    }
+}
+
+// Decentralized Identity System
+pub struct DIDManager {
+    pub keypair: Keypair,
+    pub did: DID,
+}
+
+impl DIDManager {
+    pub fn new(endpoints: Vec<String>) -> Self {
+        let mut csprng = OsRng{};
+        let keypair = Keypair::generate(&mut csprng);
+        let public_key = keypair.public.to_bytes().to_vec();
+        
+        let did_id = format!("did:duxnet:{}", hex::encode(&public_key[..16]));
+        
+        let did = DID {
+            id: did_id,
+            public_key,
+            endpoints,
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
+        
+        DIDManager { keypair, did }
+    }
+
+    pub fn sign_message(&self, message: &[u8]) -> Vec<u8> {
+        self.keypair.sign(message).to_bytes().to_vec()
+    }
+
+    pub fn verify_signature(&self, message: &[u8], signature: &[u8], public_key: &[u8]) -> bool {
+        if let Ok(pk) = PublicKey::from_bytes(public_key) {
+            if let Ok(sig) = Signature::from_bytes(signature) {
+                return pk.verify(message, &sig).is_ok();
+            }
+        }
+        false
+    }
+}
+
+// Reputation System
+pub struct ReputationSystem {
+    pub attestations: Arc<RwLock<HashMap<String, Vec<ReputationAttestation>>>>,
+    pub scores: Arc<RwLock<HashMap<String, f64>>>,
+}
+
+impl ReputationSystem {
+    pub fn new() -> Self {
+        ReputationSystem {
+            attestations: Arc::new(RwLock::new(HashMap::new())),
+            scores: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn add_attestation(&self, attestation: ReputationAttestation) -> Result<(), String> {
+        let mut attestations = self.attestations.write().await;
+        attestations
+            .entry(attestation.target_did.clone())
+            .or_insert_with(Vec::new)
+            .push(attestation);
+        
+        self.recalculate_score(&attestation.target_did).await;
+        Ok(())
+    }
+
+    pub async fn get_reputation(&self, did: &str) -> f64 {
+        let scores = self.scores.read().await;
+        scores.get(did).copied().unwrap_or(0.0)
+    }
+
+    async fn recalculate_score(&self, did: &str) {
+        let attestations = self.attestations.read().await;
+        if let Some(atts) = attestations.get(did) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            
+            let mut weighted_sum = 0.0;
+            let mut weight_sum = 0.0;
+            
+            for att in atts {
+                // Apply time decay (older attestations have less weight)
+                let age_days = (now - att.timestamp) / 86400;
+                let decay_factor = 0.95_f64.powi(age_days as i32);
+                let weight = decay_factor;
+                
+                weighted_sum += att.score * weight;
+                weight_sum += weight;
+            }
+            
+            let score = if weight_sum > 0.0 {
+                weighted_sum / weight_sum
+            } else {
+                0.0
+            };
+            
+            let mut scores = self.scores.write().await;
+            scores.insert(did.to_string(), score);
+        }
+    }
+}
+
+// Multisig Escrow System
+pub struct EscrowManager {
+    pub contracts: Arc<RwLock<HashMap<String, EscrowContract>>>,
+    pub threshold: usize,
+}
+
+impl EscrowManager {
+    pub fn new() -> Self {
+        EscrowManager {
+            contracts: Arc::new(RwLock::new(HashMap::new())),
+            threshold: 2, // 2 out of 3 multisig by default
+        }
+    }
+
+    pub async fn create_escrow(&self, buyer_did: String, seller_did: String, 
+                               arbiters: Vec<String>, amount: u64) -> Result<String, String> {
+        let escrow_id = Uuid::new_v4().to_string();
+        let multisig_address = format!("multisig_{}", &escrow_id[..8]);
+        
+        let contract = EscrowContract {
+            id: escrow_id.clone(),
+            buyer_did,
+            seller_did,
+            arbiters,
+            amount,
+            state: EscrowState::Created,
+            multisig_address,
+            signatures: HashMap::new(),
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
+        
+        let mut contracts = self.contracts.write().await;
+        contracts.insert(escrow_id.clone(), contract);
+        
+        Ok(escrow_id)
+    }
+
+    pub async fn add_signature(&self, escrow_id: &str, signer_did: &str, 
+                               signature: Vec<u8>) -> Result<(), String> {
+        let mut contracts = self.contracts.write().await;
+        if let Some(contract) = contracts.get_mut(escrow_id) {
+            contract.signatures.insert(signer_did.to_string(), signature);
+            
+            // Check if we have enough signatures to proceed
+            if contract.signatures.len() >= self.threshold {
+                match contract.state {
+                    EscrowState::Created => {
+                        contract.state = EscrowState::Funded;
+                    }
+                    EscrowState::InProgress => {
+                        contract.state = EscrowState::Completed;
+                    }
+                    _ => {}
+                }
+            }
+            
+            Ok(())
+        } else {
+            Err("Escrow contract not found".to_string())
+        }
+    }
+
+    pub async fn get_contract(&self, escrow_id: &str) -> Option<EscrowContract> {
+        let contracts = self.contracts.read().await;
+        contracts.get(escrow_id).cloned()
+    }
+}
+
+// Task Processing Engine
+pub struct TaskEngine {
+    pub pending_tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
+    pub completed_tasks: Arc<RwLock<HashMap<TaskId, TaskResult>>>,
+}
+
+impl TaskEngine {
+    pub fn new() -> Self {
+        TaskEngine {
+            pending_tasks: Arc::new(RwLock::new(HashMap::new())),
+            completed_tasks: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub async fn submit_task(&self, task: Task) -> Result<(), String> {
+        let mut pending = self.pending_tasks.write().await;
+        pending.insert(task.id.clone(), task);
+        Ok(())
+    }
+
+    pub async fn accept_task(&self, task_id: &TaskId) -> Option<Task> {
+        let mut pending = self.pending_tasks.write().await;
+        pending.remove(task_id)
+    }
+
+    pub async fn complete_task(&self, result: TaskResult) -> Result<(), String> {
+        let mut completed = self.completed_tasks.write().await;
+        completed.insert(result.task_id.clone(), result);
+        Ok(())
+    }
+
+    pub async fn process_task(&self, task: Task, processor_did: String) -> Result<TaskResult, String> {
+        // Simulate task processing
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Generate mock result and proof
+        let result_data = format!("Processed task {} by {}", task.id.0, processor_did);
+        let proof = self.generate_proof(&task, &result_data);
+        
+        Ok(TaskResult {
+            task_id: task.id,
+            processor_did,
+            result: result_data.into_bytes(),
+            proof,
+            completed_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        })
+    }
+
+    fn generate_proof(&self, task: &Task, result: &str) -> Vec<u8> {
+        let mut hasher = Sha256::new();
+        hasher.update(&task.payload);
+        hasher.update(result.as_bytes());
+        hasher.finalize().to_vec()
+    }
+}
+
+// Main DuxNet Node
+pub struct DuxNetNode {
+    pub node_id: NodeId,
+    pub did_manager: DIDManager,
+    pub dht: DHT,
+    pub reputation_system: ReputationSystem,
+    pub escrow_manager: EscrowManager,
+    pub task_engine: TaskEngine,
+    pub listener: Option<TcpListener>,
+}
+
+impl DuxNetNode {
+    pub async fn new(port: u16) -> Result<Self, Box<dyn std::error::Error>> {
+        let node_id = NodeId(Uuid::new_v4().to_string());
+        let endpoints = vec![format!("tcp://127.0.0.1:{}", port)];
+        
+        let did_manager = DIDManager::new(endpoints);
+        let dht = DHT::new(node_id.clone());
+        let reputation_system = ReputationSystem::new();
+        let escrow_manager = EscrowManager::new();
+        let task_engine = TaskEngine::new();
+        
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
+        
+        Ok(DuxNetNode {
+            node_id,
+            did_manager,
+            dht,
+            reputation_system,
+            escrow_manager,
+            task_engine,
+            listener: Some(listener),
+        })
+    }
+
+    pub async fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        println!("DuxNet Node {} starting on {}", 
+                self.node_id.0, 
+                self.did_manager.did.endpoints[0]);
+        
+        // Store our DID in the DHT
+        let did_key = format!("did:{}", self.did_manager.did.id);
+        let did_value = serde_json::to_vec(&self.did_manager.did)?;
+        self.dht.store(did_key, did_value, 86400).await?; // 24 hours TTL
+        
+        // Start accepting connections
+        if let Some(listener) = &self.listener {
+            loop {
+                let (stream, addr) = listener.accept().await?;
+                println!("New connection from {}", addr);
+                
+                // Handle connection in a separate task
+                let node_clone = self.clone_for_handler();
+                tokio::spawn(async move {
+                    if let Err(e) = node_clone.handle_connection(stream).await {
+                        eprintln!("Error handling connection: {}", e);
+                    }
+                });
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn clone_for_handler(&self) -> DuxNetNodeHandler {
+        DuxNetNodeHandler {
+            node_id: self.node_id.clone(),
+            dht: self.dht.clone(),
+            reputation_system: self.reputation_system.clone(),
+            escrow_manager: self.escrow_manager.clone(),
+            task_engine: self.task_engine.clone(),
+        }
+    }
+
+    async fn handle_connection(&self, mut stream: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+        // P2P message handling would go here
+        // For now, just close the connection
+        Ok(())
+    }
+
+    pub async fn register_service(&self, name: String, description: String, 
+                                  price: u64) -> Result<ServiceId, String> {
+        let service_id = ServiceId(Uuid::new_v4().to_string());
+        let service = ServiceMetadata {
+            id: service_id.clone(),
+            provider_did: self.did_manager.did.id.clone(),
+            name,
+            description,
+            endpoint: self.did_manager.did.endpoints[0].clone(),
+            price,
+            reputation_score: self.reputation_system.get_reputation(&self.did_manager.did.id).await,
+            last_updated: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
+        
+        self.dht.announce_service(&service).await?;
+        Ok(service_id)
+    }
+
+    pub async fn find_services(&self, query: &str) -> Vec<ServiceMetadata> {
+        self.dht.find_services(query).await
+    }
+
+    pub async fn create_escrow_for_service(&self, service_id: &ServiceId, 
+                                           seller_did: String, amount: u64) -> Result<String, String> {
+        let arbiters = vec![
+            "did:duxnet:arbiter1".to_string(),
+            "did:duxnet:arbiter2".to_string(),
+        ];
+        
+        self.escrow_manager.create_escrow(
+            self.did_manager.did.id.clone(),
+            seller_did,
+            arbiters,
+            amount
+        ).await
+    }
+}
+
+// Helper struct for handling connections
+#[derive(Clone)]
+struct DuxNetNodeHandler {
+    node_id: NodeId,
+    dht: DHT,
+    reputation_system: ReputationSystem,
+    escrow_manager: EscrowManager,
+    task_engine: TaskEngine,
+}
+
+// Example usage and testing
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Starting DuxNet Decentralized P2P Platform");
+    
+    // Create and start a node
+    let mut node = DuxNetNode::new(8080).await?;
+    
+    // Register a service
+    let service_id = node.register_service(
+        "AI Text Processing".to_string(),
+        "High-performance text analysis and processing".to_string(),
+        100, // Price in native currency units
+    ).await?;
+    
+    println!("Registered service with ID: {}", service_id.0);
+    
+    // Start the node (this will run indefinitely)
+    node.start().await?;
+    
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_dht_operations() {
+        let dht = DHT::new(NodeId("test_node".to_string()));
+        
+        // Test store and retrieve
+        dht.store("test_key".to_string(), b"test_value".to_vec(), 3600).await.unwrap();
+        let value = dht.get("test_key").await;
+        assert_eq!(value, Some(b"test_value".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn test_reputation_system() {
+        let reputation = ReputationSystem::new();
+        let did_manager = DIDManager::new(vec![]);
+        
+        let attestation = ReputationAttestation {
+            attester_did: "did:duxnet:attester".to_string(),
+            target_did: "did:duxnet:target".to_string(),
+            score: 4.5,
+            interaction_type: "service_completion".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            signature: vec![],
+        };
+        
+        reputation.add_attestation(attestation).await.unwrap();
+        let score = reputation.get_reputation("did:duxnet:target").await;
+        assert!(score > 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_escrow_creation() {
+        let escrow = EscrowManager::new();
+        
+        let escrow_id = escrow.create_escrow(
+            "buyer".to_string(),
+            "seller".to_string(),
+            vec!["arbiter1".to_string()],
+            1000,
+        ).await.unwrap();
+        
+        let contract = escrow.get_contract(&escrow_id).await;
+        assert!(contract.is_some());
+        assert_eq!(contract.unwrap().amount, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_task_processing() {
+        let engine = TaskEngine::new();
+        let task_id = TaskId(Uuid::new_v4().to_string());
+        
+        let task = Task {
+            id: task_id.clone(),
+            escrow_id: "test_escrow".to_string(),
+            service_id: ServiceId("test_service".to_string()),
+            payload: b"test_payload".to_vec(),
+            requirements: TaskRequirements {
+                cpu_cores: 2,
+                memory_mb: 1024,
+                timeout_seconds: 30,
+            },
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
+        
+        engine.submit_task(task.clone()).await.unwrap();
+        let accepted = engine.accept_task(&task_id).await;
+        assert!(accepted.is_some());
+    }
+}

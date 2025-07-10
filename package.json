@@ -1,0 +1,14 @@
+{
+  "name": "duxnet-wallet",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tauri build",
+    "dev": "tauri dev",
+    "preview": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0-beta.9"
+  }
+} 

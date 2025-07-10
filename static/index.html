@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DuxNet - Decentralized P2P Platform</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>DuxNet</h1>
+            <p>Decentralized P2P Platform</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-indicator"></div>
+                <span>Node Online</span>
+            </div>
+            <div class="status-item">
+                <span>DID: <span id="nodeDid">Loading...</span></span>
+            </div>
+            <div class="status-item">
+                <span>Reputation: <span id="nodeReputation">0.0</span></span>
+            </div>
+            <div class="status-item">
+                <span>Peers: <span id="peerCount">0</span></span>
+            </div>
+            <div class="status-item">
+                <span>Preferred Currency: 
+                    <select id="preferredCurrency" onchange="changePreferredCurrency()">
+                        <option value="USDC">USDC</option>
+                        <option value="BTC">BTC</option>
+                        <option value="ETH">ETH</option>
+                        <option value="LTC">LTC</option>
+                        <option value="XMR">XMR</option>
+                        <option value="DOGE">DOGE</option>
+                    </select>
+                </span>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="panel">
+                <h2>Service Management</h2>
+                <div class="form-group">
+                    <label for="serviceName">Service Name</label>
+                    <input type="text" id="serviceName" placeholder="Enter service name">
+                </div>
+                <div class="form-group">
+                    <label for="serviceDescription">Description</label>
+                    <textarea id="serviceDescription" placeholder="Enter service description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="servicePrice">Price</label>
+                    <div class="price-input-group">
+                        <input type="number" id="servicePrice" placeholder="Enter price" step="0.00000001">
+                        <select id="serviceCurrency">
+                            <option value="USDC">USDC</option>
+                            <option value="BTC">BTC</option>
+                            <option value="ETH">ETH</option>
+                            <option value="LTC">LTC</option>
+                            <option value="XMR">XMR</option>
+                            <option value="DOGE">DOGE</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="registerService()">Register Service</button>
+            </div>
+
+            <div class="panel">
+                <h2>Service Discovery</h2>
+                <div class="form-group">
+                    <label for="searchQuery">Search Services</label>
+                    <input type="text" id="searchQuery" placeholder="Enter search query">
+                </div>
+                <button class="btn btn-secondary" onclick="searchServices()">Search</button>
+                <div id="searchResults" class="results-container"></div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="panel">
+                <h2>Task Submission</h2>
+                <div class="form-group">
+                    <label for="taskService">Service ID</label>
+                    <input type="text" id="taskService" placeholder="Enter service ID">
+                </div>
+                <div class="form-group">
+                    <label for="taskPayload">Task Payload</label>
+                    <textarea id="taskPayload" placeholder="Enter task data"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="taskCpu">CPU Cores</label>
+                    <input type="number" id="taskCpu" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="taskMemory">Memory (MB)</label>
+                    <input type="number" id="taskMemory" value="512" min="128">
+                </div>
+                <div class="form-group">
+                    <label for="taskTimeout">Timeout (seconds)</label>
+                    <input type="number" id="taskTimeout" value="60" min="10">
+                </div>
+                <button class="btn btn-primary" onclick="submitTask()">Submit Task</button>
+            </div>
+
+            <div class="panel">
+                <h2>Escrow Management</h2>
+                <div class="form-group">
+                    <label for="escrowService">Service ID</label>
+                    <input type="text" id="escrowService" placeholder="Enter service ID">
+                </div>
+                <div class="form-group">
+                    <label for="escrowSeller">Seller DID</label>
+                    <input type="text" id="escrowSeller" placeholder="Enter seller DID">
+                </div>
+                <div class="form-group">
+                    <label for="escrowAmount">Amount</label>
+                    <div class="price-input-group">
+                        <input type="number" id="escrowAmount" placeholder="Enter amount" step="0.00000001">
+                        <select id="escrowCurrency">
+                            <option value="USDC">USDC</option>
+                            <option value="BTC">BTC</option>
+                            <option value="ETH">ETH</option>
+                            <option value="LTC">LTC</option>
+                            <option value="XMR">XMR</option>
+                            <option value="DOGE">DOGE</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn btn-secondary" onclick="createEscrow()">Create Escrow</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="panel">
+                <h2>Modern Wallet Features</h2>
+                <div class="wallet-tabs">
+                    <button class="tab-btn active" onclick="showWalletTab('balances')">Balances</button>
+                    <button class="tab-btn" onclick="showWalletTab('send')">Send</button>
+                    <button class="tab-btn" onclick="showWalletTab('receive')">Receive</button>
+                    <button class="tab-btn" onclick="showWalletTab('history')">History</button>
+                    <button class="tab-btn" onclick="showWalletTab('keys')">Keys</button>
+                    <button class="tab-btn" onclick="showWalletTab('backup')">Backup</button>
+                </div>
+
+                <!-- Balances Tab -->
+                <div id="balances-tab" class="tab-content active">
+                    <div class="balances-grid">
+                        <div class="balance-item">
+                            <h4>BTC</h4>
+                            <p id="btcBalance">0.00000000 BTC</p>
+                        </div>
+                        <div class="balance-item">
+                            <h4>ETH</h4>
+                            <p id="ethBalance">0.000000000000000000 ETH</p>
+                        </div>
+                        <div class="balance-item">
+                            <h4>USDC</h4>
+                            <p id="usdcBalance">0.000000 USDC</p>
+                        </div>
+                        <div class="balance-item">
+                            <h4>LTC</h4>
+                            <p id="ltcBalance">0.00000000 LTC</p>
+                        </div>
+                        <div class="balance-item">
+                            <h4>XMR</h4>
+                            <p id="xmrBalance">0.000000000000 XMR</p>
+                        </div>
+                        <div class="balance-item">
+                            <h4>DOGE</h4>
+                            <p id="dogeBalance">0.00000000 DOGE</p>
+                        </div>
+                    </div>
+                    <div class="total-balance">
+                        <h3>Total Value: <span id="totalUsdValue">$0.00 USD</span></h3>
+                    </div>
+                    <button class="btn btn-secondary" onclick="refreshBalances()">Refresh Balances</button>
+                </div>
+
+                <!-- Send Tab -->
+                <div id="send-tab" class="tab-content">
+                    <div class="form-group">
+                        <label for="sendToAddress">To Address</label>
+                        <input type="text" id="sendToAddress" placeholder="Enter recipient address">
+                    </div>
+                    <div class="form-group">
+                        <label for="sendAmount">Amount</label>
+                        <div class="amount-input-group">
+                            <input type="number" id="sendAmount" placeholder="Enter amount" step="0.00000001">
+                            <select id="sendCurrency">
+                                <option value="USDC">USDC</option>
+                                <option value="BTC">BTC</option>
+                                <option value="ETH">ETH</option>
+                                <option value="LTC">LTC</option>
+                                <option value="XMR">XMR</option>
+                                <option value="DOGE">DOGE</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="sendMemo">Memo (Optional)</label>
+                        <input type="text" id="sendMemo" placeholder="Enter memo">
+                    </div>
+                    <div class="fee-info">
+                        <p>Estimated Fee: <span id="estimatedFee">0.00000000</span></p>
+                    </div>
+                    <button class="btn btn-primary" onclick="sendFunds()">Send Funds</button>
+                </div>
+
+                <!-- Receive Tab -->
+                <div id="receive-tab" class="tab-content">
+                    <div class="address-display">
+                        <h3>Your Receiving Addresses</h3>
+                        <div class="address-grid">
+                            <div class="address-item">
+                                <h4>BTC Address</h4>
+                                <p id="btcAddress" class="address-text">Loading...</p>
+                                <button class="btn btn-small" onclick="copyAddress('btcAddress')">Copy</button>
+                            </div>
+                            <div class="address-item">
+                                <h4>ETH Address</h4>
+                                <p id="ethAddress" class="address-text">Loading...</p>
+                                <button class="btn btn-small" onclick="copyAddress('ethAddress')">Copy</button>
+                            </div>
+                            <div class="address-item">
+                                <h4>USDC Address</h4>
+                                <p id="usdcAddress" class="address-text">Loading...</p>
+                                <button class="btn btn-small" onclick="copyAddress('usdcAddress')">Copy</button>
+                            </div>
+                            <div class="address-item">
+                                <h4>LTC Address</h4>
+                                <p id="ltcAddress" class="address-text">Loading...</p>
+                                <button class="btn btn-small" onclick="copyAddress('ltcAddress')">Copy</button>
+                            </div>
+                            <div class="address-item">
+                                <h4>XMR Address</h4>
+                                <p id="xmrAddress" class="address-text">Loading...</p>
+                                <button class="btn btn-small" onclick="copyAddress('xmrAddress')">Copy</button>
+                            </div>
+                            <div class="address-item">
+                                <h4>DOGE Address</h4>
+                                <p id="dogeAddress" class="address-text">Loading...</p>
+                                <button class="btn btn-small" onclick="copyAddress('dogeAddress')">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History Tab -->
+                <div id="history-tab" class="tab-content">
+                    <div class="transaction-filters">
+                        <select id="historyCurrency" onchange="filterTransactions()">
+                            <option value="all">All Currencies</option>
+                            <option value="BTC">BTC</option>
+                            <option value="ETH">ETH</option>
+                            <option value="USDC">USDC</option>
+                            <option value="LTC">LTC</option>
+                            <option value="XMR">XMR</option>
+                            <option value="DOGE">DOGE</option>
+                        </select>
+                    </div>
+                    <div id="transactionHistory" class="transaction-list">
+                        <p>No transactions yet</p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="refreshTransactionHistory()">Refresh History</button>
+                </div>
+
+                <!-- Keys Tab -->
+                <div id="keys-tab" class="tab-content">
+                    <div class="warning-box">
+                        <h3>⚠️ Security Warning</h3>
+                        <p>Your private key gives full access to your wallet. Never share it with anyone!</p>
+                    </div>
+                    <div class="key-display">
+                        <div class="key-item">
+                            <h4>Public Key</h4>
+                            <p id="publicKey" class="key-text">Loading...</p>
+                            <button class="btn btn-small" onclick="copyKey('publicKey')">Copy</button>
+                        </div>
+                        <div class="key-item">
+                            <h4>Private Key (Keep Secret!)</h4>
+                            <p id="privateKey" class="key-text">Loading...</p>
+                            <button class="btn btn-small btn-danger" onclick="copyKey('privateKey')">Copy</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="refreshKeys()">Refresh Keys</button>
+                </div>
+
+                <!-- Backup Tab -->
+                <div id="backup-tab" class="tab-content">
+                    <div class="backup-section">
+                        <h3>Backup Wallet</h3>
+                        <p>Create a backup of your wallet to restore it on another device.</p>
+                        <button class="btn btn-primary" onclick="backupWallet()">Create Backup</button>
+                        <div id="backupData" class="backup-data" style="display: none;">
+                            <h4>Backup Data (Save this securely):</h4>
+                            <textarea id="backupText" readonly></textarea>
+                            <button class="btn btn-small" onclick="copyBackup()">Copy Backup</button>
+                        </div>
+                    </div>
+                    <div class="restore-section">
+                        <h3>Restore Wallet</h3>
+                        <p>Restore your wallet from a backup file.</p>
+                        <textarea id="restoreData" placeholder="Paste your backup data here"></textarea>
+                        <button class="btn btn-secondary" onclick="restoreWallet()">Restore Wallet</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-panel">
+            <h2>Network Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <h3>DHT</h3>
+                    <p>Entries: <span id="dhtEntries">0</span></p>
+                    <p>Peers: <span id="dhtPeers">0</span></p>
+                </div>
+                <div class="stat-item">
+                    <h3>Reputation</h3>
+                    <p>Nodes: <span id="repNodes">0</span></p>
+                    <p>Attestations: <span id="repAttestations">0</span></p>
+                </div>
+                <div class="stat-item">
+                    <h3>Escrow</h3>
+                    <p>Contracts: <span id="escrowContracts">0</span></p>
+                    <p>Total Amount: <span id="escrowAmount">0</span></p>
+                </div>
+                <div class="stat-item">
+                    <h3>Tasks</h3>
+                    <p>Pending: <span id="taskPending">0</span></p>
+                    <p>Completed: <span id="taskCompleted">0</span></p>
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="refreshStats()">Refresh Stats</button>
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html> 
